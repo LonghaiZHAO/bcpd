@@ -122,6 +122,9 @@ void write2d(const char *file, const double **X, int nr, int nc, const char* fmt
          printf("delimited file nor binary file. Abort.        \n");       exit(EXIT_FAILURE);
 }
 
+// Forward declaration for PLY reader
+double **read_ply(int *nr, int *nc, const char *file, const char *na);
+
 double ** read2d(int *nr, int *nc, char *mode, const char *file, const char *na){
   FILE *fp; char *s,*p,*ext,*dlm=",\t\n"; char *ptr;
   double *buf=NULL,**X; int m,n,M,N,lim=MAXC; size_t l,sz=INIT;
@@ -131,6 +134,7 @@ double ** read2d(int *nr, int *nc, char *mode, const char *file, const char *na)
   if(!(ext=strrchr(file,'.'))){goto err00;} ext++;
   if(strcmp(ext,"bin")==0) *mode='b';
   if(strcmp(ext,"txt")==0) *mode='t';
+  if(strcmp(ext,"ply")==0) *mode='p';
 
   switch(*mode){
     case 't': /* Tab-delimited file */
@@ -160,6 +164,10 @@ double ** read2d(int *nr, int *nc, char *mode, const char *file, const char *na)
       if(1!=fread(&M,si,1,fp))    {goto err04;}
       if(1!=fread(&N,si,1,fp))    {goto err04;} sz=(size_t)N*M; buf=malloc(sd*sz);
       if(sz!=fread(buf,sd,sz,fp)) {goto err05;} fclose(fp);break;
+      
+    case 'p': /* PLY file */
+      X = read_ply(nr, nc, file, na);
+      return X;
 
     case '?': fp=fopen(file,"rb"); if(!fp) goto err01; else goto err06;
   } *nr=M;*nc=N; X=calloc2d(M,N);

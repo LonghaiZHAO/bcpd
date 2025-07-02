@@ -46,7 +46,7 @@ void printUsage(void){
   printf("  o------------------------------------------------------------------------o\n"  );
   printf("  | ./bcpd -x <target point set> -y <source point set> (+ options)         |\n"  );
   printf("  o------------------------------------------------------------------------o\n"  );
-  printf("  ** Tab-separated files only. Extension of the input file MUST be '.txt'.  \n\n");
+  printf("  ** Supported file formats: '.txt' (tab-separated) and '.ply' (PLY format).\n\n");
   printf(" OPTIONS:                                                                   \n"  );
   printf("  Parameters    -w <omega>, -l <lambda>, -g <gamma> -k <kappa>              \n"  );
   printf("  Acceleration  -J <rank:P>, -K <rank:G>, kdtree: -p, -r <seed>             \n"  );
@@ -61,13 +61,15 @@ void printUsage(void){
   printf("  File Output   -o <prefix>, -s <variables:y,x,u,v,a,c,e,T,P,Y,A(=all)>     \n"  );
   printf("  Terminal I/O  quiet mode: -q, history mode: -h, warning-disabled mode: -W \n\n");
   printf("  *1) Parenthesis <...> specifies the argument of an option.                \n"  );
-  printf("  *2) The downsampling option activates BCPD++/GBCPD++.                     \n\n");
+  printf("  *2) The downsampling option activates BCPD++/GBCPD++.                     \n"  );
+  printf("  *3) You can also use positional arguments: ./bcpd TARGET SOURCE OUTPUT    \n\n");
   printf(" DEFAULT:                                                                   \n"  );
   printf("  -x X.txt, -y Y.txt, -w 0, -l 2, -b 2, -n 500, -o output_, -c 1e-4, -u e   \n"  );
   printf("  ** All accleration options are disabled unless specified explicitly.      \n\n");
   printf(" EXAMPLE:                                                                   \n"  );
   printf("  o------------------------------------------------------------------------o\n"  );
   printf("  | ./bcpd -x X.txt -y Y.txt -w0.1 -l2 -b2 -J300 -K80 -p -n90 -c1e-6 -svYP |\n"  );
+  printf("  | ./bcpd X.txt Y.txt output_ -w0.1 -l2 -b2 -J300 -K80 -p -n90 -c1e-6 -sy |\n"  );
   printf("  o------------------------------------------------------------------------o\n\n");
   printf(" REFERENCE:                                                                 \n"  );
   printf(" - Geodesic-Based Bayesian coherent point drift, IEEE TPAMI, 2022 (GBCPD).  \n"  );
