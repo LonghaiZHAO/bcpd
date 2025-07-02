@@ -23,38 +23,125 @@
 #include<assert.h>
 #include<string.h>
 #include<math.h>
+#ifdef _WIN32
+#include<windows.h>
+#include<getopt.h>
+#else
 #include<unistd.h>
+#include<sys/time.h>
+#endif
 #include<ctype.h>
 #include<time.h>
-#include<sys/time.h>
 #include"../base/util.h"
 #include"../base/misc.h"
+#ifdef USE_DUMMY_LAPACK
+#include"../base/dummy_lapack.h"
+#endif
 #include"../base/kdtree.h"
 #include"../base/kernel.h"
 #include"../base/sampling.h"
 #include"../base/sgraph.h"
 #include"../base/geokdecomp.h"
+#include"../base/plywriter.h"
 #include"bcpd.h"
 #include"info.h"
 #include"norm.h"
+
+#ifdef _WIN32
+// Windows implementation of gettimeofday
+int gettimeofday(struct timeval *tv, void *tz) {
+    FILETIME ft;
+    unsigned __int64 tmpres = 0;
+    static int tzflag = 0;
+
+    if (NULL != tv) {
+        GetSystemTimeAsFileTime(&ft);
+
+        tmpres |= ft.dwHighDateTime;
+        tmpres <<= 32;
+        tmpres |= ft.dwLowDateTime;
+
+        // Convert to microseconds
+        tmpres /= 10;
+        // Convert file time to unix epoch
+        tmpres -= 11644473600000000ULL;
+
+        tv->tv_sec = (long)(tmpres / 1000000UL);
+        tv->tv_usec = (long)(tmpres % 1000000UL);
+    }
+
+    return 0;
+}
+#endif
 
 #define SQ(x) ((x)*(x))
 
 void init_genrand64(unsigned long s);
 enum transpose {ASIS=0,TRANSPOSE=1};
 
-void save_variable(const char *prefix, const char *suffix,const double *var, int D, int J, char *fmt, int trans){
-  int d,j; char fn[256]; double **buf;
-  strcpy(fn,prefix); strcat(fn,suffix);
+void save_variable(const char *prefix, const char *suffix, const double *var, int D, int J, char *fmt, int trans, const pwpm *pm){
+  int d,j; char fn[512], *ext, *dir; double **buf;
+  
+  // Copy prefix to fn
+  strcpy(fn, prefix);
+  
+  // Check if prefix contains a directory path
+  dir = strrchr(fn, '/');
+  if (dir) {
+    // Create directory if it doesn't exist
+    char dirpath[512];
+    strncpy(dirpath, fn, dir - fn + 1);
+    dirpath[dir - fn + 1] = '\0';
+    
+    // Use system to create directory (mkdir -p creates parent directories as needed)
+    char mkdir_cmd[600];
+    sprintf(mkdir_cmd, "mkdir -p %s", dirpath);
+    system(mkdir_cmd);
+  }
+  
+  // Append suffix
+  strcat(fn, suffix);
+  
+  // Check if we should output as PLY format
+  int output_ply = 0;
+  if(strstr(suffix, ".txt") && (ext = strrchr(pm->fn[TARGET], '.'))) {
+    if(strcmp(ext, ".ply") == 0) {
+      // Replace .txt with .ply in the output filename
+      char *txt_ext = strstr(fn, ".txt");
+      if(txt_ext) {
+        strcpy(txt_ext, ".ply");
+        output_ply = 1;
+      }
+    }
+  }
+  
   if(trans==TRANSPOSE){
     buf=calloc2d(J,D);
     for(j=0;j<J;j++)for(d=0;d<D;d++) buf[j][d]=var[d+D*j];
-    write2d(fn,(const double **)buf,J,D,fmt,"NA"); free2d(buf,J);
+    
+    if(output_ply && D == 3) {
+      // Write as PLY if it's a 3D point cloud and input was PLY
+      write_ply(buf, J, D, fn);
+    } else {
+      // Otherwise write as TXT
+      write2d(fn,(const double **)buf,J,D,fmt,"NA");
+    }
+    
+    free2d(buf,J);
   }
   else {
     buf=calloc2d(D,J);
     for(j=0;j<J;j++)for(d=0;d<D;d++) buf[d][j]=var[d+D*j];
-    write2d(fn,(const double **)buf,D,J,fmt,"NA"); free2d(buf,D);
+    
+    if(output_ply && J == 3) {
+      // Write as PLY if it's a 3D point cloud and input was PLY
+      write_ply(buf, D, J, fn);
+    } else {
+      // Otherwise write as TXT
+      write2d(fn,(const double **)buf,D,J,fmt,"NA");
+    }
+    
+    free2d(buf,D);
   }
 
   return;
@@ -71,11 +158,26 @@ void save_corresp(
     pwsz          sz,
     pwpm          pm
   ){
-  int i,m,n,D,M,N; int *T,*l,*bi; double *bd; double *p,c,val; char fnP[256],fnc[256],fne[256];
+  int i,m,n,D,M,N; int *T,*l,*bi; double *bd; double *p,c,val; char fnP[512],fnc[512],fne[512];
   int S[MAXTREEDEPTH]; int top,ct; double omg,dlt,vol,rad; int si=sizeof(int),sd=sizeof(double);
   FILE *fpP=NULL,*fpc=NULL,*fpe=NULL; int db=pm.opt&PW_OPT_DBIAS; double max,min; int mmax;
+  char *dir;
 
   D=sz.D; M=sz.M; N=sz.N; omg=pm.omg; dlt=pm.dlt; rad=dlt*r;
+  
+  // Check if prefix contains a directory path
+  if ((dir = strrchr(prefix, '/'))) {
+    // Create directory if it doesn't exist
+    char dirpath[512];
+    strncpy(dirpath, prefix, dir - prefix + 1);
+    dirpath[dir - prefix + 1] = '\0';
+    
+    // Use system to create directory (mkdir -p creates parent directories as needed)
+    char mkdir_cmd[600];
+    sprintf(mkdir_cmd, "mkdir -p %s", dirpath);
+    system(mkdir_cmd);
+  }
+  
   strcpy(fnP,prefix);strcat(fnP,"P.txt");if(pm.opt&PW_OPT_SAVEP){fpP=fopen(fnP,"w");fprintf(fpP,"[n]\t[m]\t[probability]\n");}
   strcpy(fne,prefix);strcat(fne,"e.txt");if(pm.opt&PW_OPT_SAVEE){fpe=fopen(fne,"w");fprintf(fpe,"[n]\t[m]\t[probability]\n");}
   strcpy(fnc,prefix);strcat(fnc,"c.txt");if(pm.opt&PW_OPT_SAVEC){fpc=fopen(fnc,"w");fprintf(fpc,"[n]\t[1/0]\n");}
@@ -102,6 +204,21 @@ void save_corresp(
 
 int save_optpath(const char *file, const double *sy, const double *X, pwsz sz, pwpm pm, int lp){
   int N=sz.N,M=sz.M,D=sz.D; int si=sizeof(int),sd=sizeof(double);
+  char *dir;
+  
+  // Check if file contains a directory path
+  if ((dir = strrchr(file, '/'))) {
+    // Create directory if it doesn't exist
+    char dirpath[512];
+    strncpy(dirpath, file, dir - file + 1);
+    dirpath[dir - file + 1] = '\0';
+    
+    // Use system to create directory (mkdir -p creates parent directories as needed)
+    char mkdir_cmd[600];
+    sprintf(mkdir_cmd, "mkdir -p %s", dirpath);
+    system(mkdir_cmd);
+  }
+  
   FILE *fp=fopen(file,"wb");
   if(!fp){printf("Can't open: %s\n",file);exit(EXIT_FAILURE);}
   fwrite(&N, si,   1,  fp);
@@ -178,7 +295,11 @@ void check_prms(const pwpm pm, const pwsz sz){
   if(!strchr("exyn",pm.nrm)){printf("\n  ERROR: -u: Argument must be one of 'e', 'x', 'y' and 'n'. Abort.\n\n");exit(EXIT_FAILURE);}
 }
 
-void pw_getopt(pwpm *pm, int argc, char **argv){ int opt;
+void pw_getopt(pwpm *pm, int argc, char **argv){ 
+  int opt;
+  int positional_args = 0;  // 用于跟踪位置参数的数量
+  
+  // 设置默认值
   strcpy(pm->fn[TARGET],"X.txt");   pm->omg=0.0; pm->cnv=1e-4; pm->K=0; pm->opt=0.0; pm->btn=0.20; pm->bet=2.0;
   strcpy(pm->fn[SOURCE],"Y.txt");   pm->lmd=2.0; pm->nlp= 500; pm->J=0; pm->dlt=7.0; pm->lim=0.15; pm->eps=1e-3;
   strcpy(pm->fn[OUTPUT],"output_"); pm->rns=0;   pm->llp=  30; pm->G=0; pm->gma=1.0; pm->kpa=ZERO; pm->nrm='e';
@@ -187,6 +308,8 @@ void pw_getopt(pwpm *pm, int argc, char **argv){ int opt;
   strcpy(pm->fn[FUNC_X],"");
   pm->dwn[SOURCE]=0; pm->dwr[SOURCE]=0.0f;
   pm->dwn[TARGET]=0; pm->dwr[TARGET]=0.0f;
+  
+  // 处理选项参数
   while((opt=getopt(argc,argv,"X:Y:D:z:u:r:w:l:b:k:g:d:e:c:n:N:G:J:K:o:x:y:f:s:hpqvaAtWS1"))!=-1){
     switch(opt){
       case 'D': scan_dwpm( pm->dwn, pm->dwr,optarg);  break;
@@ -239,6 +362,25 @@ void pw_getopt(pwpm *pm, int argc, char **argv){ int opt;
         if(strchr(optarg,'0')) pm->opt |= PW_OPT_VTIME;
       break;
     }
+  }
+  
+  // 处理位置参数
+  for (int i = optind; i < argc; i++) {
+    switch (positional_args) {
+      case 0:  // 第一个位置参数：目标点云文件
+        strcpy(pm->fn[TARGET], argv[i]);
+        break;
+      case 1:  // 第二个位置参数：源点云文件
+        strcpy(pm->fn[SOURCE], argv[i]);
+        break;
+      case 2:  // 第三个位置参数：输出文件前缀
+        strcpy(pm->fn[OUTPUT], argv[i]);
+        break;
+      default:
+        // 忽略多余的位置参数
+        break;
+    }
+    positional_args++;
   }
   /* acceleration with default parameters */
   if(pm->opt&PW_OPT_ACCEL) {pm->J=300;pm->K=70;pm->opt|=PW_OPT_LOCAL;}
@@ -327,8 +469,8 @@ void fprint_comptime2(FILE *fp, const struct timeval *tv, double *tt, int geok){
 
 int main(int argc, char **argv){
   int d,k,l,m,n,D,M,N,lp; char mode; double s,r,Np,sgmX,sgmY,*muX,*muY; double *u,*v,*w,*R,*t,*a,*sgm;
-  pwpm pm; pwsz sz; double *x,*y,*X,*Y,*wd,**bX,**bY; int *wi; int sd=sizeof(double),si=sizeof(int); FILE *fp; char fn[256];
-  int dsz,isz,ysz,xsz; char *ytraj=".optpath.bin",*xtraj=".optpathX.bin"; double tt[7]; struct timeval tv[7];
+  pwpm pm; pwsz sz; double *x,*y,*X,*Y,*wd,**bX,**bY; int *wi; int sd=sizeof(double),si=sizeof(int); FILE *fp; char fn[512];
+  int dsz,isz,ysz,xsz; char ytraj[512], xtraj[512]; double tt[7]; struct timeval tv[7];
   int nx,ny,N0,M0=0; double rx,ry,*T,*X0,*Y0=NULL; double sgmT,*muT; double *pf;
   double *LQ=NULL,*LQ0=NULL; int *Ux,*Uy; int K; int geok=0; double *x0;
 
@@ -337,6 +479,12 @@ int main(int argc, char **argv){
   pw_getopt(&pm,argc,argv);
   bX=read2d(&N,&D,&mode,pm.fn[TARGET],"NA"); X=calloc(D*N,sd); sz.D=D;
   bY=read2d(&M,&D,&mode,pm.fn[SOURCE],"NA"); Y=calloc(D*M,sd);
+  
+  /* initialize trajectory file paths */
+  strcpy(ytraj, pm.fn[OUTPUT]);
+  strcat(ytraj, ".optpath.bin");
+  strcpy(xtraj, pm.fn[OUTPUT]);
+  strcat(xtraj, ".optpathX.bin");
   /* init: random number */
   init_genrand64(pm.rns?pm.rns:clock());
   /* check dimension */
@@ -420,8 +568,8 @@ int main(int argc, char **argv){
   gettimeofday(tv+5,NULL); tt[5]=clock();
   /* save interpolated variables */
   if(ny){
-    save_variable(pm.fn[OUTPUT],"y.interpolated.txt",T, D,M0,"%lf",TRANSPOSE); if(!(pm.opt&PW_OPT_INTPX)) goto skip;
-    save_variable(pm.fn[OUTPUT],"x.interpolated.txt",x0,D,M0,"%lf",TRANSPOSE); free(x0); skip: free(T);
+    save_variable(pm.fn[OUTPUT],"y.interpolated.txt",T, D,M0,"%lf",TRANSPOSE,&pm); if(!(pm.opt&PW_OPT_INTPX)) goto skip;
+    save_variable(pm.fn[OUTPUT],"x.interpolated.txt",x0,D,M0,"%lf",TRANSPOSE,&pm); free(x0); skip: free(T);
   }
   /* save correspondence */
   if((pm.opt&PW_OPT_SAVEP)|(pm.opt&PW_OPT_SAVEC)|(pm.opt&PW_OPT_SAVEE))
@@ -432,23 +580,23 @@ int main(int argc, char **argv){
   /* revert normalization */
   denormalize_batch(x,muX,sgmX,y,muY,sgmY,M,M,D,pm.nrm);
   /* save variables */
-  if(pm.opt&PW_OPT_SAVEY) save_variable(pm.fn[OUTPUT],"y.txt",y,D,M,"%lf",TRANSPOSE);
-  if(pm.opt&PW_OPT_SAVEX) save_variable(pm.fn[OUTPUT],"x.txt",x,D,M,"%lf",TRANSPOSE);
-  if(pm.opt&PW_OPT_SAVEU) save_variable(pm.fn[OUTPUT],"u.txt",u,D,M,"%lf",TRANSPOSE);
-  if(pm.opt&PW_OPT_SAVEV) save_variable(pm.fn[OUTPUT],"v.txt",v,D,M,"%lf",TRANSPOSE);
-  if(pm.opt&PW_OPT_SAVEA) save_variable(pm.fn[OUTPUT],"a.txt",a,M,1,"%e", ASIS);
+  if(pm.opt&PW_OPT_SAVEY) save_variable(pm.fn[OUTPUT],"y.txt",y,D,M,"%lf",TRANSPOSE,&pm);
+  if(pm.opt&PW_OPT_SAVEX) save_variable(pm.fn[OUTPUT],"x.txt",x,D,M,"%lf",TRANSPOSE,&pm);
+  if(pm.opt&PW_OPT_SAVEU) save_variable(pm.fn[OUTPUT],"u.txt",u,D,M,"%lf",TRANSPOSE,&pm);
+  if(pm.opt&PW_OPT_SAVEV) save_variable(pm.fn[OUTPUT],"v.txt",v,D,M,"%lf",TRANSPOSE,&pm);
+  if(pm.opt&PW_OPT_SAVEA) save_variable(pm.fn[OUTPUT],"a.txt",a,M,1,"%e", ASIS,&pm);
   if(pm.opt&PW_OPT_SAVET){
-    save_variable(pm.fn[OUTPUT],"s.txt",&s,1,1,"%lf",ASIS);
-    save_variable(pm.fn[OUTPUT],"R.txt", R,D,D,"%lf",ASIS);
-    save_variable(pm.fn[OUTPUT],"t.txt", t,D,1,"%lf",ASIS);
+    save_variable(pm.fn[OUTPUT],"s.txt",&s,1,1,"%lf",ASIS,&pm);
+    save_variable(pm.fn[OUTPUT],"R.txt", R,D,D,"%lf",ASIS,&pm);
+    save_variable(pm.fn[OUTPUT],"t.txt", t,D,1,"%lf",ASIS,&pm);
   }
   if((pm.opt&PW_OPT_SAVEU)|(pm.opt&PW_OPT_SAVEV)|(pm.opt&PW_OPT_SAVET)){
-    save_variable(pm.fn[OUTPUT],"normX.txt",X,D,N,"%lf",TRANSPOSE);
-    save_variable(pm.fn[OUTPUT],"normY.txt",Y,D,M,"%lf",TRANSPOSE);
+    save_variable(pm.fn[OUTPUT],"normX.txt",X,D,N,"%lf",TRANSPOSE,&pm);
+    save_variable(pm.fn[OUTPUT],"normY.txt",Y,D,M,"%lf",TRANSPOSE,&pm);
   }
   if((pm.opt&PW_OPT_SAVES)&&(pm.opt&PW_OPT_DBIAS)){
     for(m=0;m<M;m++) sgm[m]=sqrt(sgm[m]);
-    save_variable(pm.fn[OUTPUT],"Sigma.txt",sgm,M,1,"%e",ASIS);
+    save_variable(pm.fn[OUTPUT],"Sigma.txt",sgm,M,1,"%e",ASIS,&pm);
   }
   gettimeofday(tv+6,NULL); tt[6]=clock();
   /* output: computing time */

@@ -1,0 +1,23 @@
+CC = x86_64-w64-mingw32-gcc
+CFLAGS = -O3 -DMINGW32 -DUSE_DUMMY_LAPACK -I./base -I./base/rply
+LDFLAGS = -lm
+
+SOURCES = register/main.c register/bcpd.c register/info.c register/norm.c \
+          base/util.c base/misc.c base/kdtree.c base/kernel.c base/sampling.c \
+          base/sgraph.c base/geokdecomp.c base/plyreader.c base/plywriter.c \
+          base/rply/rply.c base/getopt.c base/mt64.c base/median.c base/dijkstra.c \
+          base/gaussprod.c base/gramdecomp.c base/dummy_lapack.c base/heap.c \
+          base/digamma.c
+
+OBJECTS = $(SOURCES:.c=.o)
+
+all: gbcpd.exe
+
+gbcpd.exe: $(OBJECTS)
+	$(CC) $(CFLAGS) -o win/gbcpd.exe $(OBJECTS) $(LDFLAGS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJECTS) win/gbcpd.exe

@@ -25,6 +25,9 @@
 #include<time.h>
 #include<sys/time.h>
 #include"../base/misc.h"
+#ifdef USE_DUMMY_LAPACK
+#include"../base/dummy_lapack.h"
+#endif
 #include"../base/lapack.h"
 #include"../base/kdtree.h"
 #include"../base/kernel.h"

@@ -128,9 +128,19 @@ Several examples can be watched [HERE](https://youtu.be/pbLVMDj1Zro).
 
 ### Windows
 
-Ready to go. The compilation is not required. Use the binary file `bcpd.exe` in the `win` directory.
-The binary file was created by GCC included in the 32-bit version of the MinGW system.
-Therefore, it might be quite slower than the one compiled in a Mac/Linux system.
+Ready to go. The compilation is not required. Use the binary file `bcpd.exe` or `gbcpd.exe` in the `win` directory.
+
+- `bcpd.exe`: Original BCPD executable (32-bit)
+- `gbcpd.exe`: Enhanced BCPD executable with PLY support (64-bit)
+
+The `bcpd.exe` binary file was created by GCC included in the 32-bit version of the MinGW system.
+The `gbcpd.exe` binary file was created using 64-bit MinGW cross-compiler and includes support for PLY file format.
+
+If you want to compile the Windows version yourself, you can use the following command in a Linux environment with MinGW installed:
+
+```bash
+make -f makefile.win
+```
 
 ### MacOS and Linux
 
@@ -154,6 +164,14 @@ For Windows, type the following command in the DOS prompt:
 
 ` bcpd -x <target: X> -y <source: Y> (+options) `
 
+Or, if using the enhanced version with PLY support:
+
+` gbcpd -t <target.ply> -s <source.ply> -o <output_prefix> (+options) `
+
+The enhanced version also supports a simplified command format:
+
+` gbcpd <target.ply> <source.ply> <output_prefix> `
+
 Brief instructions are printed by typing `./bcpd -v` (or `bcpd -v` for windows) in the terminal window.
 The binary file can also be executed using the `system` function in MATLAB.
 See MATLAB scripts in the `demo` folder regarding the usage of the binary file.
@@ -170,6 +188,9 @@ See MATLAB scripts in the `demo` folder regarding the usage of the binary file.
 
 - `-x [file]`: The target shape represented as a matrix of size N x D.
 - `-y [file]`: The source shape represented as a matrix of size M x D.
+- `-t [file]`: (Enhanced version) The target shape in PLY format.
+- `-s [file]`: (Enhanced version) The source shape in PLY format.
+- `-o [prefix]`: (Enhanced version) Output file prefix.
 
 Tab- and comma-separated files are accepted, and the extensions of input files
 MUST be `.txt`. If your file is space-delimited, convert it to a tab- or comma-separated file using Excel,
